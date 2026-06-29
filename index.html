@@ -9,6 +9,25 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
   <link rel="stylesheet" crossorigin href="/assets/assessmentAct-CtfbXGz7.css">
   <link rel="stylesheet" crossorigin href="/assets/base-S-mIxhSD.css">
+  <style>
+    .module-choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 8px; }
+    .module-choice-card { border: 1.5px solid var(--border); border-radius: 10px; padding: 20px; background: var(--white); cursor: pointer; transition: border-color .15s, box-shadow .15s; text-align: left; display: flex; flex-direction: column; gap: 8px; }
+    .module-choice-card:hover { border-color: var(--accent-dark); box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+    .module-choice-card.disabled { opacity: .55; cursor: not-allowed; }
+    .module-choice-card.disabled:hover { border-color: var(--border); box-shadow: none; }
+    .module-choice-card-title { font-weight: 600; font-size: 1rem; color: var(--ink); }
+    .module-choice-card-desc { font-size: .82rem; color: var(--muted); line-height: 1.45; flex-grow: 1; }
+    .module-choice-card-status { font-size: .74rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; padding: 3px 9px; border-radius: 5px; display: inline-block; width: fit-content; }
+    .module-choice-card-status.done { background: rgba(76,175,80,.12); color: var(--green, #2e7d32); }
+    .module-choice-card-status.partial { background: rgba(212,167,44,.15); color: #9a7b1e; }
+    .module-choice-card-status.todo { background: var(--accent-light); color: var(--accent-dark); }
+    .module-choice-card-status.locked { background: #eee; color: var(--muted); }
+    .evidence-wrap { margin-top: 28px; padding: 16px 18px; border: 1.5px dashed var(--border); border-radius: 8px; background: rgba(133,133,204,.04); }
+    .evidence-label { display: block; font-size: .82rem; font-weight: 600; color: var(--accent-dark); margin-bottom: 4px; }
+    .evidence-hint { font-size: .76rem; color: var(--muted); margin: 0 0 10px 0; line-height: 1.4; }
+    .evidence-textarea { width: 100%; min-height: 64px; resize: vertical; border: 1.5px solid var(--border); border-radius: 6px; padding: 10px 12px; font-family: inherit; font-size: .85rem; color: var(--ink); background: var(--white); box-sizing: border-box; }
+    .evidence-textarea:focus { outline: none; border-color: var(--accent-dark); }
+  </style>
 </head>
 
 <body>
@@ -133,7 +152,24 @@
       </div>
     </div>
     <div style="margin-top:32px;display:flex;justify-content:flex-end">
-      <button class="btn-next enabled" id="btn-start-modules">Ga naar Module A →</button>
+      <button class="btn-next enabled" id="btn-start-modules">Verder →</button>
+    </div>
+  </div>
+
+  <!-- MODULE CHOICE -->
+  <div id="screen-module-choice" class="screen">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Module-keuze</div>
+      <div class="screen-title">Welke module wilt u <em>doorlopen</em>?</div>
+      <p class="screen-sub">U kunt de modules in elke gewenste volgorde doorlopen en op elk moment teruggaan naar dit
+        keuzescherm. Module A is vereist voordat Module B of C kan worden gestart, omdat de uitkomst van Module A
+        bepaalt of het systeem überhaupt binnen de AI Act valt. Modules D, E en F volgen automatisch zodra de
+        antwoorden in Module C of B daartoe aanleiding geven.</p>
+    </div>
+    <div class="module-choice-grid" id="module-choice-grid"></div>
+    <div style="margin-top:28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+      <div style="font-size:.82rem;color:var(--muted)" id="module-choice-status"></div>
+      <button class="btn-cta" id="btn-view-results">Rapport bekijken / assessment afronden →</button>
     </div>
   </div>
 
@@ -168,6 +204,11 @@
       <div class="char-count" id="free-count"></div>
     </div>
     <div id="sub-questions-wrap"></div>
+    <div class="evidence-wrap" id="evidence-wrap">
+      <label class="evidence-label" for="evidence-input">📎 Bewijsmateriaal (optioneel)</label>
+      <p class="evidence-hint">Noteer hier welk bewijsmateriaal u heeft ter onderbouwing van uw antwoord (bijv. documentnaam, locatie, datum). Dit wordt opgenomen in het eindrapport.</p>
+      <textarea class="evidence-textarea" id="evidence-input" placeholder="Bijv. 'QMS-handboek v3, par. 4.2, opgeslagen in SharePoint /Compliance/QMS'..."></textarea>
+    </div>
     <div class="nav-row">
       <button class="btn-back" id="btn-back">← Vorige</button>
       <button class="btn-next" id="btn-next">Volgende →</button>
@@ -267,6 +308,7 @@
           <th>Vraag-ID</th>
           <th>Vraag</th>
           <th>Antwoord</th>
+          <th>Bewijsmateriaal</th>
         </tr>
       </thead>
       <tbody id="answers-tbody"></tbody>
@@ -390,11 +432,11 @@
       if (!existingSession) return;
       sessionId = existingSession.id;
       answers = existingSession.answers || {};
+      evidence = existingSession.evidence || {};
       idData = existingSession.identification || {};
-      currentIdx = existingSession.current_index || 0;
       history = [];
-      showScreen('screen-question');
-      renderQ();
+      activeModuleScope = null;
+      showModuleChoice();
     }
 
     function startFresh() {
@@ -414,7 +456,7 @@
         const res = await fetch('/open-assessment/save-progress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: activeEmail, type: 'compliance', sessionId, answers, identification: idData, currentIndex: currentIdx })
+          body: JSON.stringify({ email: activeEmail, type: 'compliance', sessionId, answers, evidence, identification: idData, currentIndex: currentIdx })
         });
         const data = await res.json();
         if (data.sessionId) sessionId = data.sessionId;
@@ -427,7 +469,7 @@
         await fetch('/open-assessment/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: activeEmail, type: 'compliance', sessionId, answers, identification: idData })
+          body: JSON.stringify({ email: activeEmail, type: 'compliance', sessionId, answers, evidence, identification: idData })
         });
       } catch (e) {}
     }
@@ -435,10 +477,12 @@
   <script>
     // STATE
     let answers = {};
+    let evidence = {};
     let history = [];
     let currentIdx = 0;
     let userEmail = '';
     let idData = {};
+    let activeModuleScope = null; // bijv. ['A'] of ['B','D','E','F'] — null = volledige vragenlijst (legacy/fallback)
 
     const MODULES = {
       A: 'Module A — AI-systeem?',
@@ -498,7 +542,44 @@
     }
     function isMinimalRisk() { return !isStoppedC() && isInScope() && !isHighRisk(); }
 
-    function getVisible() { return questions.filter(q => !q.skipIf || !q.skipIf()); }
+    // Per-module voltooiingsstatus, gebruikt door het module-keuzescherm.
+    // 'done'    = alle (huidig zichtbare) vragen van de module zijn beantwoord
+    // 'partial' = sommige beantwoord, andere nog niet
+    // 'todo'    = nog niet gestart
+    function moduleStatus(mod) {
+      const qs = questions.filter(q => q.module === mod && (!q.skipIf || !q.skipIf()));
+      if (qs.length === 0) return 'todo';
+      const answered = qs.filter(q => answers[q.id] !== undefined).length;
+      if (answered === 0) return 'todo';
+      if (answered === qs.length) return 'done';
+      return 'partial';
+    }
+
+    // Bepaalt of een module via het keuzescherm los gestart mag worden.
+    // B en C vereisen dat Module A is afgerond, omdat isAISystem()/isInScope() daarvan afhangen.
+    function moduleLocked(mod) {
+      if (mod === 'B' || mod === 'C') return moduleStatus('A') !== 'done';
+      return false; // D, E, F worden niet los aangeboden in het keuzescherm
+    }
+
+    // Geeft de modules terug die bij een gekozen doelmodule automatisch doorlopen moeten worden
+    // (de gekozen module zelf, plus eventueel verplichte voorloper A, plus D/E/F als die later relevant worden —
+    // dat laatste hoeft niet vooraf bepaald te worden, want getVisible() filtert toch op skipIf binnen de scope).
+    function scopeForTarget(targetModule) {
+      const scope = [];
+      if ((targetModule === 'B' || targetModule === 'C') && moduleStatus('A') !== 'done') scope.push('A');
+      scope.push(targetModule);
+      // D, E, F altijd toevoegen aan de scope zodat ze automatisch verschijnen zodra skipIf() dat toelaat
+      // (ze worden niet getoond als de bijbehorende voorwaarde niet vervuld is, dus dit is veilig).
+      ['D', 'E', 'F'].forEach(m => { if (!scope.includes(m)) scope.push(m); });
+      return scope;
+    }
+
+    function getVisible() {
+      const all = questions.filter(q => !q.skipIf || !q.skipIf());
+      if (!activeModuleScope) return all; // legacy fallback: volledige lijst
+      return all.filter(q => activeModuleScope.includes(q.module));
+    }
     const CRUMBS = ['A', 'B', 'C', 'D', 'E', 'F'];
   </script>
   <script>
@@ -768,7 +849,58 @@
         role: document.getElementById('id_role').value.trim(), email, appname: document.getElementById('id_appname').value.trim(),
         appversion: document.getElementById('id_appversion').value.trim(), desc: document.getElementById('id_desc').value.trim()
       };
-      currentIdx = 0; history = []; answers = {};
+      showModuleChoice();
+      saveProgress();
+    }
+
+    const MODULE_CHOICE_INFO = {
+      A: { title: 'Module A — Is er een AI-systeem?', desc: 'Bepaalt of de toepassing kwalificeert als AI-systeem in de zin van de AI Act en of zij binnen de territoriale werkingssfeer valt. Vereist startpunt van het assessment.' },
+      B: { title: 'Module B — Rolbepaling in de waardeketen', desc: 'Bepaalt de rol(len) van de organisatie (provider, deployer, importeur, distributeur, GPAI-modelprovider) en de bijbehorende verplichtingen. Vereist dat Module A is afgerond.' },
+      C: { title: 'Module C — Risicoclassificatie', desc: 'Toetst de toepassing aan de verboden praktijken (art. 5) en de hoog-risicocategorieën, en bepaalt of transparantieverplichtingen (art. 50) van toepassing zijn. Vereist dat Module A is afgerond.' },
+    };
+
+    function showModuleChoice() {
+      activeModuleScope = null;
+      renderModuleChoice();
+      showScreen('screen-module-choice');
+    }
+
+    function renderModuleChoice() {
+      const grid = document.getElementById('module-choice-grid');
+      grid.innerHTML = '';
+      ['A', 'B', 'C'].forEach(mod => {
+        const info = MODULE_CHOICE_INFO[mod];
+        const locked = moduleLocked(mod);
+        const status = moduleStatus(mod);
+        const statusLabel = locked ? 'Vereist Module A' : (status === 'done' ? 'Afgerond' : (status === 'partial' ? 'In behandeling' : 'Nog niet gestart'));
+        const statusCls = locked ? 'locked' : status;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'module-choice-card' + (locked ? ' disabled' : '');
+        card.innerHTML = `
+          <div class="module-choice-card-status ${statusCls}">${statusLabel}</div>
+          <div class="module-choice-card-title">${info.title}</div>
+          <div class="module-choice-card-desc">${info.desc}</div>
+        `;
+        if (!locked) card.onclick = () => startModuleScope(mod);
+        else card.disabled = true;
+        grid.appendChild(card);
+      });
+      const statusEl = document.getElementById('module-choice-status');
+      const doneCount = ['A', 'B', 'C'].filter(m => moduleStatus(m) === 'done').length;
+      statusEl.textContent = doneCount === 0
+        ? 'Nog geen module afgerond.'
+        : `${doneCount} van 3 hoofdmodules afgerond. Modules D, E en F worden automatisch doorlopen op basis van uw antwoorden in B en C.`;
+    }
+
+    function startModuleScope(targetModule) {
+      activeModuleScope = scopeForTarget(targetModule);
+      // Begin bij de eerste nog onbeantwoorde vraag binnen de scope, zodat al ingevulde modules niet opnieuw worden doorlopen.
+      const vis = getVisible();
+      let startIdx = vis.findIndex(q => answers[q.id] === undefined);
+      if (startIdx === -1) startIdx = Math.max(0, vis.length - 1);
+      currentIdx = startIdx;
+      history = [];
       showScreen('screen-question'); renderQ();
       saveProgress();
     }
@@ -784,7 +916,7 @@
 
     function renderQ() {
       const vis = getVisible();
-      if (currentIdx >= vis.length) { showEmailScreen(); return; }
+      if (currentIdx >= vis.length) { showModuleChoice(); return; }
       const q = vis[currentIdx];
       const pct = (currentIdx / vis.length) * 100;
       document.getElementById('q-progress').style.width = pct + '%';
@@ -823,7 +955,10 @@
           list.appendChild(btn);
         });
       }
-      document.getElementById('btn-back').style.visibility = currentIdx === 0 ? 'hidden' : 'visible';
+      document.getElementById('btn-back').style.visibility = 'visible';
+      const evInput = document.getElementById('evidence-input');
+      evInput.value = evidence[q.id] || '';
+      evInput.oninput = () => { const v = evInput.value.trim(); if (v) evidence[q.id] = evInput.value; else delete evidence[q.id]; };
       updateNext();
     }
 
@@ -842,7 +977,7 @@
         updateNext();
         if (opt.stop) { document.getElementById('stop-title').textContent = opt.stopTitle || 'Let op'; document.getElementById('stop-text').textContent = opt.stopText || ''; document.getElementById('stop-notice').style.display = 'flex'; }
         if (!opt.stop && q.type === 'single') {
-          setTimeout(async () => { const vis = getVisible(); if (currentIdx < vis.length - 1) { history.push(currentIdx); currentIdx++; await saveProgress(); renderQ(); } else showEmailScreen(); }, 300);
+          setTimeout(async () => { const vis = getVisible(); if (currentIdx < vis.length - 1) { history.push(currentIdx); currentIdx++; await saveProgress(); renderQ(); } else { await saveProgress(); showModuleChoice(); } }, 300);
         }
       }
     }
@@ -863,9 +998,9 @@
       else if (q.type === 'multi') { const s = answers[q.id]; if (!Array.isArray(s) || s.length === 0) return; }
       else { if (!answers[q.id]) return; }
       history.push(currentIdx);
-      if (currentIdx < vis.length - 1) { currentIdx++; await saveProgress(); renderQ(); } else showEmailScreen();
+      if (currentIdx < vis.length - 1) { currentIdx++; await saveProgress(); renderQ(); } else { await saveProgress(); showModuleChoice(); }
     }
-    function prevQ() { if (history.length > 0) { currentIdx = history.pop(); renderQ(); } }
+    function prevQ() { if (history.length > 0) { currentIdx = history.pop(); renderQ(); } else { showModuleChoice(); } }
 
     function showEmailScreen() { showScreen('screen-email'); }
     function clearGateError() { document.getElementById('gate-error').classList.remove('visible'); document.getElementById('gate-email').classList.remove('error'); }
@@ -1226,6 +1361,7 @@
           qid: q.qid || q.id,
           q: q.text.slice(0, 300),
           a: answerLabel(q),
+          evidence: evidence[q.id] || '',
         })),
       }));
 
@@ -1496,16 +1632,19 @@
       // Antwoordentabel
       const tb = document.getElementById('answers-tbody'); tb.innerHTML = '';
       let lastMod = '';
+      const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       getVisible().forEach(q => {
-        if (q.module !== lastMod) { const hr = document.createElement('tr'); hr.innerHTML = `<td colspan="3" style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-dark);background:var(--accent-light);padding:7px 12px;border-bottom:1px solid rgba(133,133,204,.2)">${MODULES[q.module] || q.module}</td>`; tb.appendChild(hr); lastMod = q.module; }
+        if (q.module !== lastMod) { const hr = document.createElement('tr'); hr.innerHTML = `<td colspan="4" style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-dark);background:var(--accent-light);padding:7px 12px;border-bottom:1px solid rgba(133,133,204,.2)">${MODULES[q.module] || q.module}</td>`; tb.appendChild(hr); lastMod = q.module; }
         const ans = answers[q.id]; let aStr = '<span class="answer-badge-skip">Niet beantwoord</span>';
         if (ans !== undefined && ans !== null && ans !== '') { if (Array.isArray(ans)) aStr = ans.map(v => { const o = q.options ? q.options.find(o => o.value === v) : null; return o ? o.label : v; }).join(' · '); else if (q.options) { const o = q.options.find(o => o.value === ans); aStr = o ? o.label : ans; } else aStr = '<span style="font-style:italic;color:var(--muted)">' + ans + '</span>'; }
-        const tr = document.createElement('tr'); tr.innerHTML = `<td style="color:var(--accent-dark);font-weight:600;font-size:.78rem;white-space:nowrap">${q.qid || q.id}</td><td style="color:var(--muted);font-size:.82rem;max-width:300px">${q.text.length > 90 ? q.text.substring(0, 88) + '…' : q.text}</td><td style="font-weight:500;font-size:.88rem">${aStr}</td>`; tb.appendChild(tr);
+        const ev = evidence[q.id];
+        const evStr = ev ? `<span style="white-space:pre-wrap">${escHtml(ev)}</span>` : '<span style="color:var(--muted)">—</span>';
+        const tr = document.createElement('tr'); tr.innerHTML = `<td style="color:var(--accent-dark);font-weight:600;font-size:.78rem;white-space:nowrap">${q.qid || q.id}</td><td style="color:var(--muted);font-size:.82rem;max-width:300px">${q.text.length > 90 ? q.text.substring(0, 88) + '…' : q.text}</td><td style="font-weight:500;font-size:.88rem">${aStr}</td><td style="font-size:.8rem;max-width:260px">${evStr}</td>`; tb.appendChild(tr);
       });
     }
 
     function restartAssessment() {
-      answers = {}; history = []; currentIdx = 0; userEmail = ''; idData = {};
+      answers = {}; evidence = {}; history = []; currentIdx = 0; userEmail = ''; idData = {}; activeModuleScope = null;
       activeEmail = ''; sessionId = null; existingSession = null;
       ['id_org', 'id_legalform', 'id_kvk', 'id_country', 'id_name', 'id_role', 'id_email', 'id_appname', 'id_appversion', 'id_desc'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       document.getElementById('gate-email').value = '';
@@ -1533,6 +1672,7 @@
     document.getElementById('btn-back-to-email').addEventListener('click', backToEmail);
     document.getElementById('btn-start-intro').addEventListener('click', showIdentification);
     document.getElementById('btn-start-modules').addEventListener('click', startModules);
+    document.getElementById('btn-view-results').addEventListener('click', showEmailScreen);
     document.getElementById('btn-back').addEventListener('click', prevQ);
     document.getElementById('btn-next').addEventListener('click', nextQ);
     document.getElementById('gate-email').addEventListener('input', clearGateError);
